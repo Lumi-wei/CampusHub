@@ -7,7 +7,7 @@ import {
 } from 'react';
 
 interface AuthContextType {
-  isAuthenticated: boolean | null;
+  isAuthenticated: boolean;
   setIsAuthenticated: (value: boolean) => void;
   login: (token: string) => void;
   logout: () => void;
@@ -18,11 +18,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // Initialize state directly from localStorage during render (lazy initialization)
   // This avoids synchronous setState in useEffect which causes cascading renders
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(() => {
-    const token = localStorage.getItem('token');
-    // If no token, we know user is not authenticated
-    // If token exists, return null (checking state) to verify with backend
-    return token ? null : false;
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return !!localStorage.getItem('token');
   });
 
   useEffect(() => {

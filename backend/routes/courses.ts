@@ -1,5 +1,6 @@
-import { Router, Request, Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { coursesRepository } from '../repositories/courses';
+import { notificationsRepository } from '../repositories/notifications';
 import { insertCourseSchema } from '../db/schema';
 import { ApiResponse, Course } from '../../shared/types/api';
 
@@ -44,6 +45,12 @@ router.post('/', async (req: Request, res: Response) => {
       createdAt: c.createdAt.toISOString(),
     };
     // Create notification
+    await notificationsRepository.create({
+      type: 'course',
+      title: '新课程提醒',
+      body: `${c.name} 课程已添加，任课教师：${c.teacher}`,
+      relatedId: c.id,
+    });
     res.status(201).json({ success: true, data: course } as ApiResponse<Course>);
   } catch (err) {
     res.status(500).json({ success: false, data: null, message: 'Failed to create course' });

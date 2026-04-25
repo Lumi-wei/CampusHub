@@ -7,7 +7,9 @@ import AssignmentsView from '@/components/custom/AssignmentsView';
 import CheckinView from '@/components/custom/CheckinView';
 import TodosView from '@/components/custom/TodosView';
 import NotificationsView from '@/components/custom/NotificationsView';
+import { Skeleton, SkeletonBanner, SkeletonCard, SkeletonFeatureCard } from '@/components/ui/skeleton';
 import { apiService } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import type { DashboardStats, Notification } from '@shared/types/api';
 
 type View = 'dashboard' | 'schedule' | 'assignments' | 'checkin' | 'todos' | 'notifications';
@@ -73,11 +75,40 @@ const TODAY = new Date();
 const DATE_STR = TODAY.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
 
 export default function Index() {
+  const { isAuthenticated } = useAuth();
   const [view, setView] = useState<View>('dashboard');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loadingStats, setLoadingStats] = useState(true);
+  const [loadingUser, setLoadingUser] = useState(true);
+  const [loadingNotifications, setLoadingNotifications] = useState(true);
+  const [userName, setUserName] = useState('用户');
+  const [userEmail, setUserEmail] = useState('');
+  const [editingName, setEditingName] = useState(false);
+  const [newName, setNewName] = useState('');
+
+  const fetchUserInfo = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      
+      const response = await fetch('/api/auth/me', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      const data = await response.json();
+      if (data.success && data.data) {
+        setUserName(data.data.name || '用户');
+        setUserEmail(data.data.email || '');
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingUser(false);
+    }
+  }, []);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -96,13 +127,16 @@ export default function Index() {
       if (res.success) setNotifications(res.data);
     } catch {
       // ignore
+    } finally {
+      setLoadingNotifications(false);
     }
   }, []);
 
   useEffect(() => {
     fetchStats();
     fetchNotifications();
-  }, [fetchStats, fetchNotifications]);
+    fetchUserInfo();
+  }, [fetchStats, fetchNotifications, fetchUserInfo]);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
@@ -115,6 +149,33 @@ export default function Index() {
   const navigate = (v: View) => {
     setView(v);
     setMobileOpen(false);
+  };
+
+  const handleEditName = () => {
+    setNewName(userName);
+    setEditingName(true);
+  };
+
+  const handleSaveName = async () => {
+    if (newName.trim()) {
+      try {
+        const response = await apiService.updateProfile({ name: newName.trim() });
+        if (response.success) {
+          setUserName(newName.trim());
+          toast.success('昵称已更新');
+        } else {
+          toast.error(response.message || '更新失败');
+        }
+      } catch (error) {
+        toast.error('更新失败，请稍后重试');
+      }
+    }
+    setEditingName(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingName(false);
+    setNewName('');
   };
 
   return (
@@ -158,15 +219,45 @@ export default function Index() {
         </nav>
 
         <div className="px-4 py-4 border-t border-white/10">
-          <div className="flex items-center gap-3 px-3 py-2">
-            <div className="w-9 h-9 rounded-full bg-[#2D6A9F] flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-              李
+          {editingName ? (
+            <div className="flex flex-col gap-2">
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm bg-white/10 text-white border border-white/20 focus:outline-none focus:border-white/40"
+                placeholder="输入昵称"
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveName}
+                  className="flex-1 py-1.5 bg-[#F59E0B] text-white rounded-lg text-xs font-medium hover:bg-amber-500"
+                >
+                  保存
+                </button>
+                <button
+                  onClick={handleCancelEdit}
+                  className="flex-1 py-1.5 bg-white/10 text-white rounded-lg text-xs font-medium hover:bg-white/20"
+                >
+                  取消
+                </button>
+              </div>
             </div>
-            <div>
-              <p className="text-white text-sm font-medium">李明远</p>
-              <p className="text-white/50 text-xs">计算机科学 · 大三</p>
+          ) : (
+            <div className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onClick={handleEditName}>
+              <div className="w-9 h-9 rounded-full bg-[#2D6A9F] flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                {userName.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm font-medium truncate">{userName}</p>
+                <p className="text-white/50 text-xs truncate">{userEmail || '点击编辑昵称'}</p>
+              </div>
+              <svg className="w-4 h-4 text-white/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
             </div>
-          </div>
+          )}
         </div>
       </aside>
 
@@ -224,15 +315,45 @@ export default function Index() {
           ))}
         </nav>
         <div className="px-4 py-4 border-t border-white/10">
-          <div className="flex items-center gap-3 px-3 py-2">
-            <div className="w-9 h-9 rounded-full bg-[#2D6A9F] flex items-center justify-center text-white font-bold text-sm">
-              李
+          {editingName ? (
+            <div className="flex flex-col gap-2">
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm bg-white/10 text-white border border-white/20 focus:outline-none focus:border-white/40"
+                placeholder="输入昵称"
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveName}
+                  className="flex-1 py-1.5 bg-[#F59E0B] text-white rounded-lg text-xs font-medium hover:bg-amber-500"
+                >
+                  保存
+                </button>
+                <button
+                  onClick={handleCancelEdit}
+                  className="flex-1 py-1.5 bg-white/10 text-white rounded-lg text-xs font-medium hover:bg-white/20"
+                >
+                  取消
+                </button>
+              </div>
             </div>
-            <div>
-              <p className="text-white text-sm font-medium">李明远</p>
-              <p className="text-white/50 text-xs">计算机科学 · 大三</p>
+          ) : (
+            <div className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onClick={handleEditName}>
+              <div className="w-9 h-9 rounded-full bg-[#2D6A9F] flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                {userName.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm font-medium truncate">{userName}</p>
+                <p className="text-white/50 text-xs truncate">{userEmail || '点击编辑昵称'}</p>
+              </div>
+              <svg className="w-4 h-4 text-white/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
             </div>
-          </div>
+          )}
         </div>
       </aside>
 
@@ -283,6 +404,7 @@ export default function Index() {
               loading={loadingStats}
               onNavigate={navigate}
               onRefresh={() => { fetchStats(); fetchNotifications(); }}
+              userName={userName}
             />
           )}
           {view === 'schedule' && <ScheduleView onRefresh={fetchStats} />}
@@ -310,11 +432,13 @@ function DashboardView({
   loading,
   onNavigate,
   onRefresh,
+  userName,
 }: {
   stats: DashboardStats | null;
   loading: boolean;
   onNavigate: (v: View) => void;
   onRefresh: () => void;
+  userName: string;
 }) {
   const statCards = [
     {
@@ -379,34 +503,54 @@ function DashboardView({
     <div className="space-y-6">
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards.map(card => (
-          <button
-            key={card.label}
-            onClick={card.onClick}
-            className="bg-white rounded-2xl p-5 border border-[#D1DDE8] shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-0.5 text-left w-full"
-          >
-            <div className="flex items-start justify-between">
-              <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[#5A7A99] mb-1 truncate">{card.label}</p>
-                <p className={`text-3xl font-bold ${card.color}`}>{card.value}</p>
-                <p className="text-xs text-[#5A7A99] mt-1 leading-tight">{card.sub}</p>
+        {loading ? (
+          <>
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="bg-white rounded-2xl p-5 border border-[#D1DDE8] shadow-sm">
+                <div className="flex items-start justify-between">
+                  <div className="min-w-0 flex-1">
+                    <Skeleton width="80px" height="10px" className="mb-3" />
+                    <Skeleton width="60px" height="32px" className="mb-2" />
+                    <Skeleton width="120px" height="12px" />
+                  </div>
+                  <Skeleton width="40px" height="40px" rounded />
+                </div>
               </div>
-              <div className={`w-10 h-10 rounded-xl ${card.bg} flex items-center justify-center flex-shrink-0 ml-2`}>
-                <span className={card.iconColor}>{card.icon}</span>
+            ))}
+          </>
+        ) : (
+          statCards.map(card => (
+            <button
+              key={card.label}
+              onClick={card.onClick}
+              className="bg-white rounded-2xl p-5 border border-[#D1DDE8] shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-0.5 text-left w-full"
+            >
+              <div className="flex items-start justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#5A7A99] mb-1 truncate">{card.label}</p>
+                  <p className={`text-3xl font-bold ${card.color}`}>{card.value}</p>
+                  <p className="text-xs text-[#5A7A99] mt-1 leading-tight">{card.sub}</p>
+                </div>
+                <div className={`w-10 h-10 rounded-xl ${card.bg} flex items-center justify-center flex-shrink-0 ml-2`}>
+                  <span className={card.iconColor}>{card.icon}</span>
+                </div>
               </div>
-            </div>
-          </button>
-        ))}
+            </button>
+          ))
+        )}
       </div>
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Welcome Banner */}
+        {loading ? (
+          <SkeletonBanner />
+        ) : (
         <div className="lg:col-span-2 bg-[#1E3A5F] rounded-2xl p-6 text-white relative overflow-hidden">
           <div className="absolute top-0 right-0 w-48 h-48 bg-white/5 rounded-full -translate-y-16 translate-x-16" />
           <div className="absolute bottom-0 left-0 w-32 h-32 bg-white/5 rounded-full translate-y-12 -translate-x-12" />
           <div className="relative">
-            <h2 className="text-xl font-bold mb-1">你好，李明远 👋</h2>
+            <h2 className="text-xl font-bold mb-1">你好，{userName} 👋</h2>
             <p className="text-white/70 text-sm mb-4">今天是 {DATE_STR}，祝你学习顺利！</p>
             <div className="flex flex-wrap gap-3">
               <button
@@ -430,53 +574,73 @@ function DashboardView({
             </div>
           </div>
         </div>
+        )}
 
         {/* Quick Nav Cards */}
         <div className="space-y-3">
-          {[
-            { label: '课程表管理', sub: '查看和编辑课程安排', view: 'schedule' as View, color: 'bg-blue-50', icon: '📅' },
-            { label: '待办事项', sub: '管理个人任务清单', view: 'todos' as View, color: 'bg-amber-50', icon: '✅' },
-            { label: '消息中心', sub: '查看所有通知消息', view: 'notifications' as View, color: 'bg-purple-50', icon: '🔔' },
-          ].map(item => (
-            <button
-              key={item.view}
-              onClick={() => onNavigate(item.view)}
-              className={`w-full ${item.color} rounded-xl p-4 flex items-center gap-3 hover:shadow-md transition-all duration-200 text-left border border-[#D1DDE8]`}
-            >
-              <span className="text-2xl">{item.icon}</span>
-              <div>
-                <p className="text-sm font-semibold text-[#0F1F33]">{item.label}</p>
-                <p className="text-xs text-[#5A7A99]">{item.sub}</p>
-              </div>
-              <svg className="w-4 h-4 text-[#5A7A99] ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          ))}
+          {loading ? (
+            <>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </>
+          ) : (
+            <>
+              {[
+                { label: '课程表管理', sub: '查看和编辑课程安排', view: 'schedule' as View, color: 'bg-blue-50', icon: '📅' },
+                { label: '待办事项', sub: '管理个人任务清单', view: 'todos' as View, color: 'bg-amber-50', icon: '✅' },
+                { label: '消息中心', sub: '查看所有通知消息', view: 'notifications' as View, color: 'bg-purple-50', icon: '🔔' },
+              ].map(item => (
+                <button
+                  key={item.view}
+                  onClick={() => onNavigate(item.view)}
+                  className={`w-full ${item.color} rounded-xl p-4 flex items-center gap-3 hover:shadow-md transition-all duration-200 text-left border border-[#D1DDE8]`}
+                >
+                  <span className="text-2xl">{item.icon}</span>
+                  <div>
+                    <p className="text-sm font-semibold text-[#0F1F33]">{item.label}</p>
+                    <p className="text-xs text-[#5A7A99]">{item.sub}</p>
+                  </div>
+                  <svg className="w-4 h-4 text-[#5A7A99] ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              ))}
+            </>
+          )}
         </div>
       </div>
 
       {/* Feature Overview */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          {
-            title: '课程表管理',
-            desc: '导入或手动录入课程，支持日视图和周视图切换',
-            icon: '📚',
-            view: 'schedule' as View,
-            accent: '#2D6A9F',
-          },
-          {
-            title: '作业通知',
-            desc: '追踪作业截止日期，标记完成状态，不遗漏任何提交',
-            icon: '📝',
-            view: 'assignments' as View,
-            accent: '#DC2626',
-          },
-          {
-            title: '签到提醒',
-            desc: '发起签到任务，记录出勤状态，查看历史签到记录',
-            icon: '✔️',
+        {loading ? (
+          <>
+            <SkeletonFeatureCard />
+            <SkeletonFeatureCard />
+            <SkeletonFeatureCard />
+            <SkeletonFeatureCard />
+          </>
+        ) : (
+          <>
+            {[
+              {
+                title: '课程表管理',
+                desc: '导入或手动录入课程，支持日视图和周视图切换',
+                icon: '📚',
+                view: 'schedule' as View,
+                accent: '#2D6A9F',
+              },
+              {
+                title: '作业通知',
+                desc: '追踪作业截止日期，标记完成状态，不遗漏任何提交',
+                icon: '📝',
+                view: 'assignments' as View,
+                accent: '#DC2626',
+              },
+              {
+                title: '签到提醒',
+                desc: '发起签到任务，记录出勤状态，查看历史签到记录',
+                icon: '✔️',
             view: 'checkin' as View,
             accent: '#16A34A',
           },
@@ -504,6 +668,8 @@ function DashboardView({
             </div>
           </button>
         ))}
+          </>
+        )}
       </div>
     </div>
   );

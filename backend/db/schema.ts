@@ -102,6 +102,26 @@ export const insertTodoSchema = createInsertSchema(todos, {
   createdAt: z.date().optional(),
 }).omit({ id: true, createdAt: true } as const);
 
+// Users
+export const users = pgTable('users', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  email: text('email').unique().notNull(),
+  passwordHash: text('password_hash').notNull(),
+  name: text('name').notNull(),
+  role: text('role').notNull().default('student'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+export const insertUserSchema = createInsertSchema(users, {
+  email: z.string().email(),
+  passwordHash: z.string().min(1),
+  name: z.string().min(2),
+  role: z.enum(['student', 'teacher', 'admin']).default('student'),
+  id: z.string().optional(),
+  createdAt: z.date().optional(),
+}).omit({ id: true, createdAt: true } as const);
+
 // Notifications
 export const notifications = pgTable('notifications', {
   id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),

@@ -41,7 +41,12 @@ router.get('/', async (_req: Request, res: Response) => {
     const checkinRate = checkinTotal > 0 ? Math.round((checkinPresent / checkinTotal) * 100) : 0;
 
     const pendingTodos = allTodos.filter(t => t.status === 'pending');
-    const todayDueTodos = pendingTodos.filter(t => t.dueDate && new Date(t.dueDate).toDateString() === todayStr).length;
+    const todayUTC = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+    const todayDueTodos = pendingTodos.filter(t => {
+      if (!t.dueDate) return false;
+      const dueDateUTC = new Date(Date.UTC(new Date(t.dueDate).getFullYear(), new Date(t.dueDate).getMonth(), new Date(t.dueDate).getDate()));
+      return dueDateUTC.getTime() === todayUTC.getTime();
+    }).length;
     const unreadNotifications = allNotifications.filter(n => !n.isRead).length;
 
     const stats: DashboardStats = {

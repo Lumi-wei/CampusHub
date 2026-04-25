@@ -86,7 +86,9 @@ router.post('/records', async (req: Request, res: Response) => {
     if (!sessionId || !courseName) {
       return res.status(400).json({ success: false, data: null, message: 'Missing required fields' });
     }
-    const r = await checkinsRepository.createRecord(sessionId, courseName, status || 'present');
+    const validStatuses = ['present', 'absent', 'late'];
+    const recordStatus = (status && validStatuses.includes(status)) ? status : 'present';
+    const r = await checkinsRepository.createRecord(sessionId, courseName, recordStatus);
     res.status(201).json({ success: true, data: mapRecord(r) } as ApiResponse<CheckinRecord>);
   } catch {
     res.status(500).json({ success: false, data: null, message: 'Failed to create record' });

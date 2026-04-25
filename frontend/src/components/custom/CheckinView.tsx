@@ -58,7 +58,12 @@ export default function CheckinView({ onRefresh }: { onRefresh: () => void }) {
   const handleCheckin = async (session: CheckinSession) => {
     setCheckinLoading(session.id);
     try {
-      const res = await apiService.createCheckinRecord(session.id, session.courseName, 'present');
+      const res = await apiService.createCheckinRecord({
+        sessionId: session.id,
+        courseName: session.courseName,
+        status: 'present',
+        checkinTime: new Date().toISOString()
+      });
       if (res.success) {
         toast.success('签到成功！');
         fetchData();

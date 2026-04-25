@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { apiService } from '@/lib/api';
 import type { Course, CreateCourseRequest } from '@shared/types/api';
@@ -36,6 +36,12 @@ export default function ScheduleView({ onRefresh }: { onRefresh: () => void }) {
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [form, setForm] = useState<CreateCourseRequest>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [ocrProcessing, setOcrProcessing] = useState(false);
+  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchCourses = useCallback(async () => {
     setLoading(true);
@@ -116,6 +122,134 @@ export default function ScheduleView({ onRefresh }: { onRefresh: () => void }) {
     }
   };
 
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+        setShowCamera(true);
+      }
+    } catch (err) {
+      toast.error('无法访问相机，请检查权限设置或使用上传图片功能');
+      fileInputRef.current?.click();
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current?.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+    }
+    setShowCamera(false);
+    setCapturedImage(null);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0);
+        const imageData = canvas.toDataURL('image/jpeg', 0.9);
+        setCapturedImage(imageData);
+      }
+    }
+  };
+
+  const processImageWithOCR = async (imageData: string) => {
+    setOcrProcessing(true);
+    try {
+      const Tesseract = await import('tesseract.js');
+      const result = await Tesseract.recognize(imageData, 'eng+chi', {
+        logger: m => console.log(m)
+      });
+      
+      const text = result.data.text;
+      const extractedCourses = parseCourseText(text);
+      
+      if (extractedCourses.length > 0) {
+        toast.success(`识别到 ${extractedCourses.length} 门课程`);
+        setForm(extractedCourses[0]);
+        setShowForm(true);
+      } else {
+        toast.error('未识别到课程信息，请手动输入');
+        setShowForm(true);
+      }
+    } catch (err) {
+      console.error('OCR Error:', err);
+      toast.error('图片识别失败，请手动输入课程信息');
+      setShowForm(true);
+    } finally {
+      setOcrProcessing(false);
+      stopCamera();
+    }
+  };
+
+  const parseCourseText = (text: string): CreateCourseRequest[] => {
+    const lines = text.split('\n').filter(line => line.trim().length > 0);
+    const courses: CreateCourseRequest[] = [];
+    
+    const dayMap: { [key: string]: number } = {
+      '周日': 0, '周一': 1, '周二': 2, '周三': 3, '周四': 4, '周五': 5, '周六': 6,
+      'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6,
+      '日': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6,
+    };
+    
+    const timeRegex = /(\d{1,2})[:：](\d{2})\s*[-~至]\s*(\d{1,2})[:：](\d{2})/;
+    
+    for (const line of lines) {
+      const timeMatch = line.match(timeRegex);
+      let dayOfWeek = 1;
+      let startTime = '09:00';
+      let endTime = '10:40';
+      
+      if (timeMatch) {
+        startTime = `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}`;
+        endTime = `${timeMatch[3].padStart(2, '0')}:${timeMatch[4]}`;
+      }
+      
+      for (const [day, num] of Object.entries(dayMap)) {
+        if (line.includes(day)) {
+          dayOfWeek = num;
+          break;
+        }
+      }
+      
+      const cleanLine = line.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, ' ').trim();
+      if (cleanLine.length >= 2) {
+        courses.push({
+          name: cleanLine.substring(0, 20),
+          teacher: '待定',
+          location: '待定',
+          dayOfWeek,
+          startTime,
+          endTime,
+          color: COLORS[courses.length % COLORS.length].value,
+        });
+      }
+    }
+    
+    return courses.slice(0, 1);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const imageData = event.target?.result as string;
+        setCapturedImage(imageData);
+        await processImageWithOCR(imageData);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const displayedCourses = viewMode === 'day'
     ? courses.filter(c => c.dayOfWeek === selectedDay)
     : courses;
@@ -152,6 +286,16 @@ export default function ScheduleView({ onRefresh }: { onRefresh: () => void }) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
           添加课程
+        </button>
+        <button
+          onClick={startCamera}
+          className="flex items-center gap-2 px-4 py-2 bg-[#F59E0B] text-white rounded-xl text-sm font-semibold hover:bg-amber-500 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          拍照识别
         </button>
       </div>
 
@@ -378,6 +522,82 @@ export default function ScheduleView({ onRefresh }: { onRefresh: () => void }) {
               >
                 {saving ? '保存中...' : '保存'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Camera Capture Modal */}
+      {showCamera && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-[#D1DDE8] flex items-center justify-between">
+              <h3 className="text-base font-bold text-[#0F1F33]">拍照识别课程</h3>
+              <button onClick={stopCamera} className="text-[#5A7A99] hover:text-[#0F1F33]">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-4">
+              {!capturedImage ? (
+                <div className="relative bg-black rounded-xl overflow-hidden">
+                  <video
+                    ref={videoRef}
+                    className="w-full h-auto"
+                    autoPlay
+                    playsInline
+                    muted
+                  />
+                  <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-4">
+                    <button
+                      onClick={capturePhoto}
+                      className="w-16 h-16 rounded-full bg-white border-4 border-[#1E3A5F] flex items-center justify-center hover:scale-105 transition-transform"
+                    >
+                      <div className="w-12 h-12 rounded-full bg-[#1E3A5F]" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <img src={capturedImage} alt="Captured" className="w-full rounded-xl" />
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setCapturedImage(null)}
+                      className="flex-1 px-4 py-2 text-sm font-semibold text-[#5A7A99] bg-[#F0F4F8] rounded-xl hover:bg-[#E0E8F0] transition-colors"
+                    >
+                      重新拍照
+                    </button>
+                    <button
+                      onClick={() => processImageWithOCR(capturedImage)}
+                      disabled={ocrProcessing}
+                      className="flex-1 px-4 py-2 text-sm font-semibold bg-[#1E3A5F] text-white rounded-xl hover:bg-[#2D6A9F] transition-colors disabled:opacity-50"
+                    >
+                      {ocrProcessing ? '识别中...' : '开始识别'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              <canvas ref={canvasRef} className="hidden" />
+              <div className="mt-4 p-3 bg-blue-50 rounded-xl">
+                <p className="text-xs text-blue-800">
+                  💡 提示：请确保课表图片清晰，光线充足，可以提高识别准确率。支持中英文课表识别。
+                </p>
+              </div>
+              <div className="mt-4">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full px-4 py-2 text-sm font-semibold text-[#2D6A9F] bg-white border border-[#2D6A9F] rounded-xl hover:bg-blue-50 transition-colors"
+                >
+                  从相册选择图片
+                </button>
+              </div>
             </div>
           </div>
         </div>
